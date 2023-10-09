@@ -149,6 +149,7 @@ export function postAttributeToChat(actor, attribute, challengeRoll) {
     chatData.sound = CONFIG.sounds.dice
     ChatMessage.create(chatData)
   })
+  return resultTextGM;
 }
 
 /* -------------------------------------------- */

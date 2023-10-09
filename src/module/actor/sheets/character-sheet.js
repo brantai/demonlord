@@ -102,6 +102,14 @@ export default class DLCharacterSheet extends DLBaseActorSheet {
       const currentAncestriesIds = this.actor.items.filter(i => i.type === 'ancestry').map(i => i._id)
       if (currentAncestriesIds?.length > 0) await this.actor.deleteEmbeddedDocuments('Item', currentAncestriesIds)
       return true
+    } else if (type === 'item') {
+      const matchingItems = await this.actor.items.filter(i => i.sameItem(itemData))
+      if (matchingItems?.length == 1) {
+        const itemUpdate = {'_id': matchingItems[0]._id, 'system.quantity': matchingItems[0].system.quantity+1}
+        await this.actor.updateEmbeddedDocuments('Item', [itemUpdate])
+
+        return false
+      }
     } else if (type === 'path' && this.actor.system.paths?.length >= 3) return false
 
     return true
@@ -283,6 +291,7 @@ export default class DLCharacterSheet extends DLBaseActorSheet {
     html.on('mousedown', '.item-uses', async ev => {
       const id = $(ev.currentTarget).closest('[data-item-id]').data('itemId')
       const item = duplicate(this.actor.items.get(id))
+      const documents = []
       if (ev.button == 0) {
         item.system.quantity++
       } else if (ev.button == 2) {
@@ -290,7 +299,8 @@ export default class DLCharacterSheet extends DLBaseActorSheet {
           item.system.quantity--
         }
       }
-      await Item.updateDocuments([item], { parent: this.actor })
+      documents.push(item)
+      await Item.updateDocuments(documents, { parent: this.actor })
     })
 
     // Rest character

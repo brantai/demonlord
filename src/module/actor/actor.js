@@ -14,7 +14,7 @@ import {
   postSpellToChat,
   postTalentToChat,
 } from '../chat/roll-messages'
-import {handleCreateAncestry, handleCreatePath, handleCreateRole } from '../item/nested-objects'
+import {handleCreateAncestry, handleCreatePath, handleCreateRole, handleCreateItem} from '../item/nested-objects'
 import {TokenManager} from '../pixi/token-manager'
 import {findAddEffect, findDeleteEffect} from "../demonlord";
 
@@ -252,6 +252,8 @@ export class DemonlordActor extends Actor {
         await handleCreatePath(this, doc)
       } else if (doc.type === 'creaturerole') {
         await handleCreateRole(this, doc)
+      } else if (['item','weapon','armor'].includes(doc.type)) {
+        await handleCreateItem(this, doc)
       }
 
       await DLActiveEffects.embedActiveEffects(this, doc, 'create')
@@ -416,6 +418,7 @@ export class DemonlordActor extends Actor {
     const challengeRoll = new Roll(this.rollFormula(modifier, boons, boonsReroll), {})
     challengeRoll.evaluate({async: false})
     postAttributeToChat(this, attribute, challengeRoll)
+    return postAttributeToChat(this, attribute, challengeRoll)
   }
 
   rollChallenge(attribute) {
@@ -781,14 +784,53 @@ export class DemonlordActor extends Actor {
     })
   }
 
+  async getItemLinkedSpellIds(itemId) {
+    const item = this.items.get(itemId)
+    const ids = []
+    if (item.system.contents.length > 0) {
+      const linkedSpells = this.spells.filter(i => i.flags?.demonlord?.parentItemId == item.uuid)
+      for (const spell of linkedSpells) {
+        ids.push(spell._id)
+      }
+    }
+    return ids
+  }
+
+  async deleteItemLinkedSpells(parentItemId) {
+    let ids = []
+    ids = await this.getItemLinkedSpellIds(parentItemId)
+    if (ids.length) await this.deleteEmbeddedDocuments('Item', ids)
+  }
+
+  async getSpellsContainedInItem(itemData) {
+    const containerSpells = itemData.system.contents.filter(i => i.type === 'spell')
+    const spells = []
+    for (const spell of containerSpells) {
+      if (![spell.name].includes(itemData.name)) spell.name = `${spell.name} (${itemData.name})`
+      spell.system.castings.max = spell.system.quantity
+      spell.system.castings.ignoreCalculation = true
+      spell['flags.demonlord.parentItemId'] = itemData.uuid
+      if (spell.flags?.core?.sourceId == undefined) spell['flags.core.sourceId'] = spell.uuid
+      spells.push(spell)
+    }
+    return spells
+  }
+
   async setUsesOnSpells() {
     const power = this.system.characteristics.power
     const diff = []
     this.items
       .filter(i => i.type === 'spell')
       .map(s => {
-        // The castings on this spell have been set by the user, skip the calculation
-        if (s.system.castings.ignoreCalculation) return
+        if (s.flags?.demonlord?.parentItemId != undefined) {
+          const linkedItem = this.items.find(i => i.uuid == s.flags.demonlord.parentItemId)
+          const currentMax = s.system.castings.max
+          const itemQuantity = linkedItem.system.quantity
+          const itemCastings = linkedItem.system.contents.find(i => i.uuid == s.flags.core.sourceId).system.quantity
+          const newMax = itemQuantity*itemCastings
+          if (currentMax !== newMax) diff.push({_id: s.id, 'data.castings.max': newMax})
+          return
+        } else if (s.system.castings.ignoreCalculation) return // The castings on this spell have been set by the user, skip the calculation
         const rank = s.system.rank
         const currentMax = s.system.castings.max
         const newMax = CONFIG.DL.spelluses[power]?.[rank] ?? 0

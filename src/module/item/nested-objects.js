@@ -171,6 +171,7 @@ export async function getNestedDocument(nestedData) {
 export async function getNestedItemData(nestedData) {
   const entity = await getNestedDocument(nestedData)
 
+
   // Get the item data OBJECT. If the item is not an item, then it has been retreived using the data saved in the nested
   let itemData = undefined
   if (entity instanceof Item) {
@@ -198,6 +199,9 @@ export async function getNestedItemData(nestedData) {
   // Remember user selection & enrich description
   itemData.selected = nestedData.selected
   itemData.system.enrichedDescriptionUnrolled = await enrichHTMLUnrolled(itemData?.system?.description)
+
+  // Keep the quantity previously stored, if any
+  itemData.system.quantity = nestedData?.system?.quantity ?? itemData.system.quantity
 
   // Return only the data
   // Warning: here the implicit assertion is that entity is an Item and not an Actor or something else
@@ -285,6 +289,17 @@ export async function handleCreateAncestry(actor, ancestryItem) {
   return createdItems
 }
 
+/* -------------------------------------------- */
+
+export async function handleCreateItem(actor, item) {
+
+  if (!['item', 'weapon', 'armor'].includes(item.type) || item.system.contents.length <= 0) {
+    return
+  } else {
+    const linkedSpells = await actor.getSpellsContainedInItem(item)
+    if (linkedSpells.length > 0) return await actor.createEmbeddedDocuments('Item', linkedSpells)
+  }
+}
 /* -------------------------------------------- */
 
 /**

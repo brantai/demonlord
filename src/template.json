@@ -238,10 +238,13 @@
             "max": 0
           }
         }
+      },
+      "container": {
+        "contents": [] 
       }
     },
     "item": {
-      "templates": ["base", "action", "enchantment"],
+      "templates": ["base", "action", "enchantment", "container"],
       "quantity": 1,
       "availability": "",
       "value": "",
@@ -254,7 +257,7 @@
     "spell": {
       "tradition": "",
       "edit": false,
-      "templates": ["base", "action"],
+      "templates": ["base", "action", "container"],
       "spelltype": "",
       "rank": 0,
       "attribute": "",
@@ -322,7 +325,7 @@
       "isActive": false
     },
     "weapon": {
-      "templates": ["base", "action", "enchantment"],
+      "templates": ["base", "action", "enchantment", "container"],
       "hands": "",
       "properties": "",
       "requirement": {
@@ -335,7 +338,7 @@
       "value": ""
     },
     "armor": {
-      "templates": ["base", "enchantment"],
+      "templates": ["base", "enchantment", "container"],
       "properties": "",
       "defense": "",
       "agility": "",

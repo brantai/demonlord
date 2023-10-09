@@ -7,6 +7,10 @@ import 'tippy.js/animations/shift-away.css';
 import {initDlEditor} from "../../utils/editor";
 import {DemonlordItem} from "../item";
 import {enrichHTMLUnrolled, i18n} from "../../utils/utils";
+import {
+  getNestedDocument,
+  getNestedItemData
+} from '../nested-objects';
 
 export default class DLBaseItemSheet extends ItemSheet {
   /** @override */
@@ -60,6 +64,7 @@ export default class DLBaseItemSheet extends ItemSheet {
     data.config = DL
     data.item = itemData
     data.system = this.document.system
+    data.contents = (data.system.hasOwnProperty('contents') && data.system.contents.length > 0)
 
     // Enrich the description
     data.system.enrichedDescription = await TextEditor.enrichHTML(this.document.system.description, {async: true});
@@ -74,6 +79,10 @@ export default class DLBaseItemSheet extends ItemSheet {
     if (data.item.type === 'weapon' || data.item.type === 'spell' || data.item.type === 'talent') this._prepareDamageTypes(data)
 
     this.sectionStates = this.sectionStates || new Map()
+
+    if (data.system.hasOwnProperty('contents') && data.system.contents.length > 0) {
+      data.system.contents = await Promise.all(data.system.contents.map(await getNestedItemData))
+    }
 
     return data
   }
@@ -231,6 +240,26 @@ export default class DLBaseItemSheet extends ItemSheet {
       } else collapsableTitles.removeClass('active')
     })
 
+    // Contents Quantity Button Info
+    html.find('.dlToggleInfoBtn').click(ev => {
+      const root = $(ev.currentTarget).closest('[data-item-id]')
+      const elem = $(ev.currentTarget)
+      const selector = '.fa-chevron-down, .fa-chevron-up'
+      const chevron = elem.is(selector) ? elem : elem.find(selector);
+      const elements = $(root).find('.dlInfo')
+      elements.each((_, el) => {
+        if (el.style.display === 'none') {
+          $(el).slideDown(100)
+          chevron?.removeClass('fa-chevron-up')
+          chevron?.addClass('fa-chevron-down')
+        } else {
+          $(el).slideUp(100)
+          chevron?.removeClass('fa-chevron-down')
+          chevron?.addClass('fa-chevron-up')
+        }
+      })
+    })
+
     // Add drag events.
     html
       .find('.drop-area, .dl-drop-zone, .dl-drop-zone *')
@@ -238,13 +267,26 @@ export default class DLBaseItemSheet extends ItemSheet {
       .on('dragleave', await this._onDragLeave.bind(this))
       .on('drop', await this._onDrop.bind(this))
 
+    // Create nested items by dropping onto item
+    this.form.ondrop = ev => this._onDropItem(ev);
+    
     // Custom editor
     initDlEditor(html, this)
 
-    // Nested item create, edit
+    // Nested item create, edit, delete
+    html.on('mousedown', '.item-uses', async ev => await this._onUpdateItemQuantity(ev))
     html.find('.create-nested-item').click(async (ev) => await this._onNestedItemCreate(ev))
     html.find('.edit-nested-item').click(async (ev) => await this._onNestedItemEdit(ev))
+    html.find('.item-delete').click(async ev => await this._onItemDelete(ev))
 
+    if (this.object.parent?.isOwner) {
+      const dragHandler = async ev => await this._onDrag(ev)
+      html.find('.dl-nested-item').each((i, li) => {
+        li.setAttribute('draggable', true)
+        li.addEventListener('dragstart', dragHandler, false)
+        li.addEventListener('dragend', dragHandler, false)
+      })
+    } 
   }
 
   /* -------------------------------------------- */
@@ -271,8 +313,6 @@ export default class DLBaseItemSheet extends ItemSheet {
     // Set the flag if textbox has been modified. Clear if blank.
     const target = ev.currentTarget
     const spell = sheet.object
-    console.log(ev);
-    console.log(spell);
     if (target.value === "") {
       await spell.update({ system: { castings: { ignoreCalculation: false }}})
     } else {
@@ -282,6 +322,28 @@ export default class DLBaseItemSheet extends ItemSheet {
 
   /* -------------------------------------------- */
 
+async _onDrag(ev){
+    const itemIndex = $(ev.currentTarget).closest('[data-item-index]').data('itemIndex')
+    const data = await this.getData({})
+    if (ev.type == 'dragend') {
+      if (data.system.contents[itemIndex].system.quantity <= 1) {
+        await this.deleteContentsItem(itemIndex)
+      } else {
+        await this.decreaseItemQuantity(itemIndex)
+      }
+    } else if (ev.type == 'dragstart') {
+      const dragData = { type: 'Item', 'uuid': data.system.contents[itemIndex].uuid }
+      /**if (data.system.contents[itemIndex].flags?.core?.sourceId) {
+        dragData.uuid = data.system.contents[itemIndex].flags.core.sourceId
+      }else if (data.system.contents[itemIndex]._source?.uuid) {
+        dragData.uuid = data.system.contents[itemIndex]._source.uuid
+      } else {
+        dragData.uuid = data.system.contents[itemIndex].uuid
+      }**/
+      ev.dataTransfer.setData("text/plain", JSON.stringify(dragData));
+    }
+  }
+  
   _onDragOver(ev) {
     $(ev.originalEvent.target).addClass('drop-hover')
   }
@@ -290,8 +352,57 @@ export default class DLBaseItemSheet extends ItemSheet {
     $(ev.originalEvent.target).removeClass('drop-hover')
   }
 
-  _onDrop(ev) {
+  async _onDrop(ev) {
     $(ev.originalEvent.target).removeClass('drop-hover')
+  }
+
+  async _onDropItem(ev){
+    const data = await this.getData({})
+    if (data.hasOwnProperty('contents')){
+      try {
+        const itemData = JSON.parse(ev.dataTransfer.getData('text/plain'))
+        if (itemData.type === 'Item') {
+          let actor
+          const item = await fromUuid(itemData.uuid)
+          if (itemData.uuid.startsWith('Actor.')) {
+            actor = item.parent
+            const itemUpdate = {'_id': item._id}
+            //const item = duplicate(actor.items.get(itemData.uuid.split('.').toReversed()[0]))
+
+            //If our item exists outside of the actor-embedded version, use that as our source
+            if (item.flags?.core?.sourceId != undefined) {
+              game.items.getName(item.name) ? itemData.uuid = game.items.getName(item.name).uuid : itemData.uuid = item.flags.core.sourceId
+            } else {
+              //If the item only exists embedded in the actor, create it as a world-level item and
+              //update the original's core.sourceId flag.
+              const newItem = await this.createNestedItem(duplicate(item), `${actor.name}'s Items`)
+              itemUpdate['flags.core.sourceId'] = newItem.uuid;
+              itemData.uuid = newItem.uuid
+            }
+            if (itemUpdate?.flags?.core?.sourceId == undefined) itemUpdate['flags.core.sourceId'] = itemData.uuid
+          }
+
+            //If the item we're adding is the same as the container, bail now
+            if (this.item.sameItem(item)) {
+              console.log('Refusing to add item to itself')
+              return
+          }
+
+          if (actor != undefined) {
+            if (item.system.quantity > 1) {
+              itemUpdate['system.quantity'] = item.system.quantity-1;
+              await actor.updateEmbeddedDocuments('Item', [itemUpdate])
+            } else {
+              await actor.deleteEmbeddedDocuments('Item',[item._id])
+            }
+          }
+
+      }
+      await this.addContentItem(itemData)
+    } catch (e) {
+        console.warn(e)
+      }
+    }
   }
 
   async _onNestedItemCreate(ev) {
@@ -300,24 +411,96 @@ export default class DLBaseItemSheet extends ItemSheet {
     // Create a folder for the quick item to be stored in
     const folderLoc = $(ev.currentTarget).closest('[data-folder-loc]').data('folderLoc')
     const folderName = i18n("DL." + folderLoc)
-    let folder = game.folders.find(f => f.name === folderName)
-    if (!folder) {
-      folder = await Folder.create({name:folderName, type: DemonlordItem.documentName})
-    }
 
-    const item = await DemonlordItem.create({
+    
+    const item = {
       name: `New ${type.capitalize()}`,
       type: type,
-      folder: folder.id,
       data: {},
-    })
-
+    }
+    await this.createNestedItem(item, folderName)
     item.sheet.render(true)
     this.render()
     return item
   }
 
   // eslint-disable-next-line no-unused-vars
-  _onNestedItemEdit(ev) {
+  async _onNestedItemEdit(ev) {
+    const data = await this.getData({})
+    if (!data.contents) {
+      return
+    }
+    const itemId = $(ev.currentTarget).closest('[data-item-id]').data('itemId')
+    const nestedData = data.system.contents.find(i => i._id === itemId)
+    await getNestedDocument(nestedData).then(d => {
+      if (d.sheet) d.sheet.render(true)
+      else ui.notifications.warn('The item is not present in the game and cannot be edited.')
+    })
+  }
+
+  async _onItemDelete(ev) {
+    const itemIndex = $(ev.currentTarget).closest('[data-item-index]').data('itemIndex')
+    await this.deleteContentsItem(itemIndex)
+
+  }
+
+  /* -------------------------------------------- */
+  /*  Item Container functions                    */
+  /* -------------------------------------------- */
+  async _onUpdateItemQuantity(ev) {
+    const itemIndex = $(ev.currentTarget).closest('[data-item-index]').data('itemIndex')
+
+    if (ev.button == 0) {
+      await this.increaseItemQuantity(itemIndex)
+    } else if (ev.button == 2) {
+      await this.decreaseItemQuantity(itemIndex)
+    }
+  }
+
+  async createNestedItem(itemData, folderName) {
+    let folder = game.folders.find(f => f.name === folderName)
+    if (!folder) {
+      folder = await Folder.create({name:folderName, type: DemonlordItem.documentName})
+    }
+    if (itemData?._id != undefined) delete itemData._id;
+    itemData.folder = folder._id
+
+    return await DemonlordItem.create(itemData)
+  }
+
+  async addContentItem(data) {
+    const item = await getNestedItemData(data)
+    if (!item || !['ammo', 'armor', 'item', 'spell', 'weapon'].includes(item.type)) return
+    const containerData = duplicate(this.item)
+    const existingItem = containerData.system.contents.find(content => content._id == item._id)
+    if (existingItem != null) {
+      await this.increaseItemQuantity(containerData.system.contents.indexOf(existingItem))
+    } else {
+      containerData.system.contents.push(item)
+      await this.item.update(containerData, {diff: false}).then(_ => this.render)
+    }
+  }
+
+  async increaseItemQuantity(itemIndex) {
+    const itemData = duplicate(this.item)
+    itemData.system.contents[itemIndex].system.quantity++
+    await this.item.update(itemData, {diff: false}).then(_ => this.render)
+  }
+
+  async decreaseItemQuantity(itemIndex) {
+    const itemData = duplicate(this.item)
+    if (itemData.system.contents[itemIndex].system.quantity > 0) {
+      itemData.system.contents[itemIndex].system.quantity--
+      await this.item.update(itemData, {diff: false}).then(_ => this.render)
+    } else {
+      return
+    }
+  }
+
+  async deleteContentsItem(itemIndex) {
+    const itemData = duplicate(this.item)
+
+    itemData.system.contents.splice(itemIndex, 1)
+    await this.item.update(itemData)
   }
 }

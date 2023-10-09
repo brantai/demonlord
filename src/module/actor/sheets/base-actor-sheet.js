@@ -101,7 +101,7 @@ export default class DLBaseActorSheet extends ActorSheet {
   /** @override */
   async _onDropItemCreate(itemData) {
     const isAllowed = await this.checkDroppedItem(itemData)
-    if (isAllowed) return await super._onDropItemCreate(itemData)
+    if (isAllowed) return super._onDropItemCreate(itemData)
     console.warn('Wrong item type dragged', this.actor, itemData)
   }
 
@@ -146,7 +146,7 @@ export default class DLBaseActorSheet extends ActorSheet {
   async showDeleteDialog(title, content, htmlItem) {
     const deleteItem = async () => {
       const id = htmlItem.data('itemId') || htmlItem.data('item-id')
-      await Item.deleteDocuments([id], {parent: this.actor})
+      await this.actor.deleteEmbeddedDocuments('Item', [id])
       htmlItem.slideUp(200, () => this.render(false))
     }
 

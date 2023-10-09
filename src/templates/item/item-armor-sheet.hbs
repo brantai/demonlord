@@ -103,7 +103,7 @@
             </div>
           </div>
         </div>
-
+        {{#if contents}}<hr>{{>"systems/demonlord/templates/item/partial/item-contents.hbs"}}{{/if}}
       </div>
       {{> "systems/demonlord/templates/item/partial/item-description.hbs"}} {{#if effects}}{{>
     "systems/demonlord/templates/item/partial/item-effects.hbs"}}{{/if}}
