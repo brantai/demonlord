@@ -64,7 +64,6 @@ export default class DLBaseItemSheet extends ItemSheet {
     data.config = DL
     data.item = itemData
     data.system = this.document.system
-    data.contents = (data.system.hasOwnProperty('contents') && data.system.contents.length > 0)
 
     // Enrich the description
     data.system.enrichedDescription = await TextEditor.enrichHTML(this.document.system.description, {async: true});
@@ -80,7 +79,7 @@ export default class DLBaseItemSheet extends ItemSheet {
 
     this.sectionStates = this.sectionStates || new Map()
 
-    if (data.system.hasOwnProperty('contents') && data.system.contents.length > 0) {
+    if (data?.system?.contents != undefined && data.system.contents.length > 0) {
       data.system.contents = await Promise.all(data.system.contents.map(await getNestedItemData))
     }
 
@@ -358,16 +357,15 @@ async _onDrag(ev){
 
   async _onDropItem(ev){
     const data = await this.getData({})
-    if (data.hasOwnProperty('contents')){
+    if (data?.contents != undefined){
       try {
         const itemData = JSON.parse(ev.dataTransfer.getData('text/plain'))
         if (itemData.type === 'Item') {
           let actor
           const item = await fromUuid(itemData.uuid)
+          const itemUpdate = {'_id': item._id}
           if (itemData.uuid.startsWith('Actor.')) {
             actor = item.parent
-            const itemUpdate = {'_id': item._id}
-            //const item = duplicate(actor.items.get(itemData.uuid.split('.').toReversed()[0]))
 
             //If our item exists outside of the actor-embedded version, use that as our source
             if (item.flags?.core?.sourceId != undefined) {

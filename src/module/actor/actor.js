@@ -824,11 +824,11 @@ export class DemonlordActor extends Actor {
       .map(s => {
         if (s.flags?.demonlord?.parentItemId != undefined) {
           const linkedItem = this.items.find(i => i.uuid == s.flags.demonlord.parentItemId)
-          const currentMax = s.system.castings.max
+          const actorMax = s.system.castings.max
           const itemQuantity = linkedItem.system.quantity
           const itemCastings = linkedItem.system.contents.find(i => i.uuid == s.flags.core.sourceId).system.quantity
-          const newMax = itemQuantity*itemCastings
-          if (currentMax !== newMax) diff.push({_id: s.id, 'data.castings.max': newMax})
+          const itemMax = itemQuantity*itemCastings
+          if (actorMax !== itemMax) diff.push({_id: s.id, 'data.castings.max': itemMax})
           return
         } else if (s.system.castings.ignoreCalculation) return // The castings on this spell have been set by the user, skip the calculation
         const rank = s.system.rank

@@ -1,4 +1,4 @@
-import {diff, detailedDiff} from 'deep-object-diff'
+import {diff} from 'deep-object-diff'
 import {deleteActorNestedItems} from './nested-objects'
 import {DemonlordActor} from '../actor/actor'
 
